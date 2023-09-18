@@ -1,0 +1,519 @@
+#!/usr/bin/env bash
+#
+# Script to create virtual host for Nginx server
+#
+
+# UnComment it if bash is lower than 4.x version
+shopt -s extglob
+
+################################################################################
+# CORE FUNCTIONS - Do not edit
+################################################################################
+
+## Uncomment it for debugging purpose
+###set -o errexit
+#set -o pipefail
+#set -o nounset
+#set -o xtrace
+
+#
+# VARIABLES
+#
+_bold=$(tput bold)
+_underline=$(tput sgr 0 1)
+_reset=$(tput sgr0)
+
+_purple=$(tput setaf 171)
+_red=$(tput setaf 1)
+_green=$(tput setaf 76)
+_tan=$(tput setaf 3)
+_blue=$(tput setaf 38)
+
+#
+# HEADERS & LOGGING
+#
+function _debug()
+{
+    if [[ "$DEBUG" = 1 ]]; then
+        "$@"
+    fi
+}
+
+function _header()
+{
+    printf '\n%s%s==========  %s  ==========%s\n' "$_bold" "$_purple" "$@" "$_reset"
+}
+
+function _arrow()
+{
+    printf '➜ %s\n' "$@"
+}
+
+function _success()
+{
+    printf '%s✔ %s%s\n' "$_green" "$@" "$_reset"
+}
+
+function _error() {
+    printf '%s✖ %s%s\n' "$_red" "$@" "$_reset"
+}
+
+function _warning()
+{
+    printf '%s➜ %s%s\n' "$_tan" "$@" "$_reset"
+}
+
+function _underline()
+{
+    printf '%s%s%s%s\n' "$_underline" "$_bold" "$@" "$_reset"
+}
+
+function _bold()
+{
+    printf '%s%s%s\n' "$_bold" "$@" "$_reset"
+}
+
+function _note()
+{
+    printf '%s%s%sNote:%s %s%s%s\n' "$_underline" "$_bold" "$_blue" "$_reset" "$_blue" "$@" "$_reset"
+}
+
+function _die()
+{
+    _error "$@"
+    exit 1
+}
+
+function _safeExit()
+{
+    exit 0
+}
+
+#
+# UTILITY HELPER
+#
+function _seekConfirmation()
+{
+  printf '\n%s%s%s' "$_bold" "$@" "$_reset"
+  read -p " (y/n) " -n 1
+  printf '\n'
+}
+
+# Test whether the result of an 'ask' is a confirmation
+function _isConfirmed()
+{
+    if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+        return 0
+    fi
+    return 1
+}
+
+
+function _typeExists()
+{
+    if type "$1" >/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+function _isOs()
+{
+    if [[ "${OSTYPE}" == $1* ]]; then
+      return 0
+    fi
+    return 1
+}
+
+function _isOsDebian()
+{
+    if [[ -f /etc/debian_version ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+function _isOsRedHat()
+{
+    if [[ -f /etc/redhat-release ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+function _isOsMac()
+{
+    if [[ "$(uname -s)" = "Darwin" ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+function _checkRootUser()
+{
+    #if [ "$(id -u)" != "0" ]; then
+    if [ "$(whoami)" != 'root' ]; then
+        _die "You cannot run $0 as non-root user. Please use sudo $0"
+    fi
+}
+
+
+function askYesOrNo {
+    REPLY=""
+    while [ -z "$REPLY" ] ; do
+        read -ep "$1 $YES_NO_PROMPT" -n1 REPLY
+        REPLY=$(echo ${REPLY}|tr [:lower:] [:upper:])
+        case $REPLY in
+            $YES_CAPS ) return 0 ;;
+            $NO_CAPS ) return 1 ;;
+            * ) REPLY=""
+        esac
+    done
+}
+
+
+################################################################################
+# SCRIPT FUNCTIONS
+################################################################################
+function _printUsage()
+{
+    echo -n "Docker Init Magento Cloud Docker
+Version $VERSION
+
+./scripts/$(basename "$0") [ARG]...
+
+    Options:
+        --php-version             PHP version used for application (php70|php71|php72|php73|php74|php74-c2|php81-c2|php82).
+        --domain                  Domain name (eg: test.com).
+        -h, --help                Display this help and exit.
+
+    Examples:
+      Install Magento Cloud Docker version 2.4.4 with PHP version 8.1 for domain test-magento-cloud.com:
+        ./scripts/$(basename "$0") --domain=test-magento-cloud.com --php-version=php81-c2
+"
+    exit 1
+}
+
+function checkCmdDependencies()
+{
+    local _dependencies=(
+      wget
+      cat
+      basename
+      mkdir
+      cp
+      mv
+      rm
+      chown
+      chmod
+      date
+      find
+      awk
+      docker-compose
+      docker
+    )
+
+    for cmd in "${_dependencies[@]}"
+    do
+        hash "${cmd}" &>/dev/null || _die "'${cmd}' command not found."
+    done;
+}
+
+function mappingDockerToContainer()
+{
+    _arrow "Creating volume link /var/run/docker.sock"
+    IMAGE_ID="(docker-compose ps -q ${APP_PHP})"
+    docker commit ${IMAGE_ID} "${APP_PHP}_image"
+    docker run -d -v "/var/run/docker.sock:/var/run/docker.sock" "${APP_PHP}_image" || _die "Cannot create volume '/var/run/docker.sock' to container ${APP_PHP}"
+    _success "Done"
+}
+
+function installDocker()
+{
+    _arrow "Installing Docker in container ${APP_PHP}"
+    docker-compose exec --user root ${APP_PHP} bash -c 'apt update && apt install -y apt-transport-https ca-certificates curl software-properties-common && curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add - && add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu focal stable" && apt-cache policy docker-ce && apt install -y docker-ce && usermod -aG docker root && docker --version' || _die "'docker' can not be install" 
+    _success "Install Docker done"
+}
+
+function installDockerCompose()
+{
+    _arrow "Installing Docker Compose in container ${APP_PHP}"
+    docker-compose exec -T --user root ${APP_PHP} bash -c 'curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose && chmod +x /usr/local/bin/docker-compose && docker-compose --version' || _die "'docker-compose' can not be install"
+    _success "Install Docker Compose done"
+}
+
+function processArgs()
+{
+    for arg in "$@"
+    do
+        case $arg in
+            --domain=*)
+                VHOST_DOMAIN="${arg#*=}"
+            ;;
+            --php-version=*)
+                APP_PHP="${arg#*=}"
+            ;;            
+            --debug)
+                DEBUG=1
+                set -o xtrace
+            ;;
+            -h|--help)
+                _printUsage
+            ;;
+            *)
+                _printUsage
+            ;;
+        esac
+    done
+        
+    validateArgs
+    sanitizeArgs
+}
+
+function initDefaultArgs()
+{
+    SCRIPTS_DIR="$(pwd)/scripts"
+    SOURCE_DIR="$(pwd)/sources"
+
+    YES_STRING=$"y"
+    NO_STRING=$"n"
+    YES_NO_PROMPT=$"[y/n]: "
+    YES_CAPS=$(echo ${YES_STRING}|tr [:lower:] [:upper:])
+    NO_CAPS=$(echo ${NO_STRING}|tr [:lower:] [:upper:])
+
+    NGINX_SITES_CONF_D="$(pwd)/conf/nginx/conf.d"
+    NGINX_SITES_CONF_D_FILE="${NGINX_SITES_CONF_D}/${VHOST_DOMAIN}.conf"
+}
+
+
+function validateArgs()
+{
+    ERROR_COUNT=0
+    if [[ -z "$VHOST_DOMAIN" ]]; then
+        _error "--domain=... parameter is missing."
+        ERROR_COUNT=$((ERROR_COUNT + 1))
+    fi
+    if [[ ! -z "$APP_PHP" && "$APP_PHP" != @(php70|php71|php72|php73|php74|php74-c2|php81-c2|php82) ]]; then
+        _error "Please enter valid application php --php-version=... parameter(php70|php71|php72|php73|php74|php74-c2|php81-c2|php82)."
+        ERROR_COUNT=$((ERROR_COUNT + 1))
+    fi
+    if [[ -z "$APP_PHP" ]]; then
+        _error "--php-version=... parameter is missing."
+        ERROR_COUNT=$((ERROR_COUNT + 1))
+    fi
+    
+    [[ "$ERROR_COUNT" -gt 0 ]] && exit 1
+}
+
+function sanitizeArgs()
+{
+    if [[ ! -z "$VHOST_DOMAIN" ]] && [[ "$VHOST_DOMAIN" == http* ]]; then
+        VHOST_DOMAIN=$(getPureDomain)
+    fi
+}
+
+function validateBaseServices()
+{
+    if [[ ! $($SCRIPTS_DIR/list-services | grep $APP_PHP) ]]; then
+        _error "$APP_PHP service should be started, please start $APP_PHP"
+        exit 1
+    fi
+}
+
+
+function checkComposerAuth()
+{
+    MAGENTO_USERNAME_PROP="http-basic.repo.magento.com.username"
+    MAGENTO_PASSWORD_PROP="http-basic.repo.magento.com.password"
+
+        PUBLIC_KEY="$(docker-compose exec -T --user nginx ${APP_PHP} composer config --global $MAGENTO_USERNAME_PROP 2>/dev/null)"
+        PRIVATE_KEY="$(docker-compose exec -T --user nginx ${APP_PHP} composer config --global $MAGENTO_PASSWORD_PROP 2>/dev/null)"
+
+    if [ -z "$PUBLIC_KEY" ] || [ -z "$PRIVATE_KEY" ]; then
+        echo
+        echo "Composer authentication required (repo.magento.com public and private keys):"
+        read -r -p "    Username: " PUBLIC_KEY
+        read -r -p "    Password: " PRIVATE_KEY
+        echo
+        if [ -z "$PUBLIC_KEY" ] || [ -z "$PRIVATE_KEY" ]; then
+            _error "Please setup Composer auth for repo.magento.com to continue."
+        fi
+        _arrow "Configure magento repo auth"
+        $(docker-compose exec -T --user nginx ${APP_PHP} composer config --global http-basic.repo.magento.com ${PUBLIC_KEY} ${PRIVATE_KEY}) || _die "Cannot configure magento auth"
+        _success "Configure magento repo auth done"
+    fi
+
+}
+
+function installEceToolsPackage()
+{
+    _arrow "Install package magento/ece-tools"
+    docker-compose exec -T --user nginx ${APP_PHP} bash -c 'cd ./'${VHOST_DOMAIN}' && composer require --dev --no-update magento/ece-tools && composer update' || _die "Cannot install magento/ece-tools package"
+    _success "Install package magento/ece-tools done"
+}
+
+function installDockerCloudPackage()
+{
+    _arrow "Install package magento/magento-cloud-docker"
+    docker-compose exec -T --user root ${APP_PHP} bash -c 'cd ./'${VHOST_DOMAIN}' && composer require --dev --no-update magento/magento-cloud-docker && composer update' || _die "Cannot install magento/magento-cloud-docker package"
+    _success "Install package magento/magento-cloud-docker done"
+}
+
+function installDockerCloud()
+{
+    _arrow "Creating .magento.docker.yml file..."
+    prepareDockerFilePath
+    prepareDockerFileContent
+    _success "Done"
+    _arrow "Creating an entry to /etc/hosts file..."
+    createEtcHostEntry
+    # mappingDockerToContainer
+    _success "Done"
+    _arrow "Configuring docker cloud..."
+    applyDockerConfig
+    _success "Done"
+}
+
+function createEtcHostEntry()
+{
+    local _etcHostLine="127.0.0.1 magento2.docker"
+    if grep -Eq "127.0.0.1[[:space:]]+magento2.docker" /etc/hosts; then
+        _warning "Entry ${_etcHostLine} already exists in host file"
+    else
+        echo "Your system password has been requested to add an entry to /etc/hosts..."
+        echo "127.0.0.1  magento2.docker" | sudo tee -a /etc/hosts || _die "Unable to write host to /etc/hosts"
+    fi
+}
+
+function prepareDockerFilePath()
+{
+    if [[ ! -f "${SOURCE_DIR}/$VHOST_DOMAIN/.magento.docker.yml" ]]; then
+        _warning "${SOURCE_DIR}/$VHOST_DOMAIN/.magento.docker.yml is not exist yet!"
+        if askYesOrNo $"Do you want to create it?"; then
+            _arrow "Creating ${SOURCE_DIR}/$VHOST_DOMAIN/.magento.docker.yml"
+            sudo touch ${SOURCE_DIR}/$VHOST_DOMAIN/.magento.docker.yml
+            sudo chmod 777 -R ${SOURCE_DIR}/$VHOST_DOMAIN/.magento.docker.yml
+            _success "${SOURCE_DIR}/$VHOST_DOMAIN/.magento.docker.yml created!"
+        else
+            _error "Please check your source path or manual create it!"
+            exit 1
+        fi
+    fi
+}
+
+function prepareDockerFileContent()
+{
+    echo "name: magento
+system:
+    mode: 'developer'
+services:
+    php:
+        version: '8.1'
+        extensions:
+            enabled:
+                - xsl
+                - json
+                - redis
+    mysql:
+        version: '8.0'
+        image: 'mysql'
+    redis:
+        version: '7.0'
+        image: 'redis'
+    opensearch:
+        version: '1.2'
+        image: 'magento/magento-cloud-docker-opensearch'
+hooks:
+    build: |
+        set -e
+        php ./vendor/bin/ece-tools run scenario/build/generate.xml
+        php ./vendor/bin/ece-tools run scenario/build/transfer.xml
+    deploy: |
+        set -e
+        php ./vendor/bin/ece-tools run scenario/deploy.xml        
+        echo 'Removing sample data...'
+        php -f bin/magento sampledata:remove
+    post_deploy: 'php ./vendor/bin/ece-tools run scenario/post-deploy.xml'
+mounts:
+    var:
+        path: 'var'
+    app-etc:
+        path: 'app/etc'
+    pub-media:
+        path: 'pub/media'
+    pub-static:
+        path: 'pub/static'
+
+" > "${SOURCE_DIR}/$VHOST_DOMAIN/.magento.docker.yml" || _die "Couldn't write to file: ${SOURCE_DIR}/$VHOST_DOMAIN/.magento.docker.yml"
+    _arrow "${SOURCE_DIR}/$VHOST_DOMAIN/.magento.docker.yml file has been created."
+}
+
+function applyDockerConfig()
+{
+    _arrow "Running vendor/bin/ece-docker build:compose to create docker compose file"
+    docker-compose exec --user nginx ${APP_PHP} bash -c './'$VHOST_DOMAIN'/vendor/bin/ece-docker build:compose --mode="developer" --sync-engine="native" --expose-db-port=3306 --with-cron --set-docker-host --with-xdebug' || _die "Running vendor/bin/ece-docker build:compose failed"
+    docker-compose exec --user nginx ${APP_PHP} bash -c 'cd ./'$VHOST_DOMAIN' && cp .docker/config.php.dist .docker/config.php && bin/magento-docker pull && bin/magento-docker up' || _die "Can not create docker config"
+    DATABASE_NAME="magento2"
+    rootPass="magento2"
+    ADMIN_USER="Admin"
+    ADMIN_PASSWORD="123123q"
+    VHOST_DOMAIN_PATH=$VHOST_DOMAIN
+    VHOST_DOMAIN="magento2.docker"
+}
+
+function printSuccessMessage()
+{
+    echo "################################################################"
+    echo ""
+    echo " >> Domain               : ${VHOST_DOMAIN}"
+    echo " >> PHP version          : ${APP_PHP}"
+    echo " >> Document Root        : /home/public_html/${VHOST_DOMAIN_PATH}/"
+    echo " >> Nginx Config File    : ${NGINX_SITES_CONF_D_FILE}"
+    echo " >> Database name        : ${DATABASE_NAME}"
+    echo " >> Database User        : root"
+    echo " >> Database Password    : ${rootPass}"
+    echo " >> Admin URL            : http://${VHOST_DOMAIN}/admin"
+    echo " >> Admin User           : $ADMIN_USER"
+    echo " >> Admin Password       : $ADMIN_PASSWORD"
+    echo ""
+    echo "################################################################"
+}
+
+################################################################################
+# Main
+################################################################################
+export LC_CTYPE=C
+export LANG=C
+
+DEBUG=0
+_debug set -x
+VERSION="1"
+
+function main()
+{
+    checkCmdDependencies
+    
+    [[ $# -lt 1 ]] && _printUsage
+
+    processArgs "$@"
+    initDefaultArgs
+    $(docker-compose exec -T --user nginx ${APP_PHP} docker &>/dev/null) || installDocker
+    $(docker-compose exec -T --user nginx ${APP_PHP} docker-compose &>/dev/null) || installDockerCompose
+
+    validateBaseServices
+
+    checkComposerAuth
+    $(docker-compose exec -T --user nginx ${APP_PHP} bash -c 'cd ./'${VHOST_DOMAIN}' && composer show -- magento/ece-tools &>/dev/null') || installEceToolsPackage
+    $(docker-compose exec -T --user nginx ${APP_PHP} bash -c 'cd ./'${VHOST_DOMAIN}' && composer show -- magento/magento-cloud-docker &>/dev/null') || installDockerCloudPackage
+    installDockerCloud
+
+    printSuccessMessage
+    exit 0
+}
+
+main "$@"
+
+_debug set +x

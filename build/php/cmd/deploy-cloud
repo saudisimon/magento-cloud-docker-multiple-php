@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+#
+# Script to create virtual host for Nginx server
+#
+
+# UnComment it if bash is lower than 4.x version
+shopt -s extglob
+
+################################################################################
+# CORE FUNCTIONS - Do not edit
+################################################################################
+
+## Uncomment it for debugging purpose
+###set -o errexit
+#set -o pipefail
+#set -o nounset
+#set -o xtrace
+
+
+#
+# VARIABLES
+#
+_bold=$(tput bold)
+_underline=$(tput sgr 0 1)
+_reset=$(tput sgr0)
+
+_purple=$(tput setaf 171)
+_red=$(tput setaf 1)
+_green=$(tput setaf 76)
+_tan=$(tput setaf 3)
+_blue=$(tput setaf 38)
+
+#
+# HEADERS & LOGGING
+#
+function _debug()
+{
+    if [[ "$DEBUG" = 1 ]]; then
+        "$@"
+    fi
+}
+
+function _header()
+{
+    printf '\n%s%s==========  %s  ==========%s\n' "$_bold" "$_purple" "$@" "$_reset"
+}
+
+function _arrow()
+{
+    printf '➜ %s\n' "$@"
+}
+
+function _success()
+{
+    printf '%s✔ %s%s\n' "$_green" "$@" "$_reset"
+}
+
+function _error() {
+    printf '%s✖ %s%s\n' "$_red" "$@" "$_reset"
+}
+
+function _warning()
+{
+    printf '%s➜ %s%s\n' "$_tan" "$@" "$_reset"
+}
+
+function _underline()
+{
+    printf '%s%s%s%s\n' "$_underline" "$_bold" "$@" "$_reset"
+}
+
+function _bold()
+{
+    printf '%s%s%s\n' "$_bold" "$@" "$_reset"
+}
+
+function _note()
+{
+    printf '%s%s%sNote:%s %s%s%s\n' "$_underline" "$_bold" "$_blue" "$_reset" "$_blue" "$@" "$_reset"
+}
+
+function _die()
+{
+    _error "$@"
+    exit 1
+}
+
+function _safeExit()
+{
+    exit 0
+}
+
+
+function checkCmdDependencies()
+{
+    local _dependencies=(
+      docker-compose
+      docker
+    )
+
+    for cmd in "${_dependencies[@]}"
+    do
+        hash "${cmd}" &>/dev/null || _die "'${cmd}' command not found."
+    done;
+}
+
+function processArgs()
+{
+    for arg in "$@"
+    do
+        case $arg in
+            --with-uninstall)
+                WITH_UNINSTALL=1
+            ;;            
+            --debug)
+                DEBUG=1
+                set -o xtrace
+            ;;
+            -h|--help)
+                _printUsage
+            ;;
+            *)
+                _printUsage
+            ;;
+        esac
+    done
+}
+
+
+
+################################################################################
+# Main
+################################################################################
+export LC_CTYPE=C
+export LANG=C
+
+DEBUG=0
+_debug set -x
+VERSION="1"
+
+# SCRIPT FUNCTIONS
+################################################################################
+function _printUsage()
+{
+    echo -n "ECE Deploy source to container
+Version $VERSION
+
+$(basename "$0") [ARG]...
+
+    Options:
+        --with-uninstall             Uninstall Magento before deploy source.
+        -h, --help                   Display this help and exit.
+
+    Examples:
+      Install Magento Cloud Docker version 2.4.4 with PHP version 8.1 for domain test-magento-cloud.com:
+        $(basename "$0") --with-uninstall
+"
+    exit 1
+}
+
+
+function main()
+{   
+    checkCmdDependencies
+    [[ $# -gt 2 ]] && _printUsage
+
+    processArgs "$@"
+    if [[ "${WITH_UNINSTALL}" -eq 1 ]]; then
+      _arrow "Unstalling Magento..."
+      docker-compose run --rm deploy magento-command setup:uninstall || _die "Cannot uninstall Magento"
+      _success "Done"
+    fi
+    _arrow "Copying source code to container..."
+    bin/magento-docker copy-to --all || _die "Cannot copy source code to container"
+    _success "Done"
+    _arrow "Fixing ownership..."
+    bin/magento-docker fix-owns || _die "Cannot fix ownership"
+    _success "Done"
+    _arrow "Starting Deploy..."
+    bin/magento-docker ece-deploy || _die "Cannot deploy"
+    _success "Done"
+
+    exit 0
+}
+
+main "$@"
+
+_debug set +x
