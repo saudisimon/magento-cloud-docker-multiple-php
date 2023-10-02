@@ -1,0 +1,389 @@
+#!/usr/bin/env bash
+#
+# Script to create virtual host for Nginx server
+#
+
+# UnComment it if bash is lower than 4.x version
+shopt -s extglob
+
+################################################################################
+# CORE FUNCTIONS - Do not edit
+################################################################################
+
+## Uncomment it for debugging purpose
+###set -o errexit
+#set -o pipefail
+#set -o nounset
+#set -o xtrace
+
+#
+# VARIABLES
+#
+_bold=$(tput bold)
+_underline=$(tput sgr 0 1)
+_reset=$(tput sgr0)
+
+_purple=$(tput setaf 171)
+_red=$(tput setaf 1)
+_green=$(tput setaf 76)
+_tan=$(tput setaf 3)
+_blue=$(tput setaf 38)
+
+#
+# HEADERS & LOGGING
+#
+function _debug()
+{
+    if [[ "$DEBUG" = 1 ]]; then
+        "$@"
+    fi
+}
+
+function _header()
+{
+    printf '\n%s%s==========  %s  ==========%s\n' "$_bold" "$_purple" "$@" "$_reset"
+}
+
+function _arrow()
+{
+    printf '➜ %s\n' "$@"
+}
+
+function _updateInfo()
+{
+    printf '%s➜ %s%s\n' "$_blue" "$@" "$_reset"
+}
+
+function _success()
+{
+    printf '%s✔ %s%s\n' "$_green" "$@" "$_reset"
+}
+
+function _error() {
+    printf '%s✖ %s%s\n' "$_red" "$@" "$_reset"
+}
+
+function _warning()
+{
+    printf '%s➜ %s%s\n' "$_tan" "$@" "$_reset"
+}
+
+function _underline()
+{
+    printf '%s%s%s%s\n' "$_underline" "$_bold" "$@" "$_reset"
+}
+
+function _bold()
+{
+    printf '%s%s%s\n' "$_bold" "$@" "$_reset"
+}
+
+function _note()
+{
+    printf '%s%s%sNote:%s %s%s%s\n' "$_underline" "$_bold" "$_blue" "$_reset" "$_blue" "$@" "$_reset"
+}
+
+function _die()
+{
+    _error "$@"
+    exit 1
+}
+
+function _safeExit()
+{
+    exit 0
+}
+
+#
+# UTILITY HELPER
+#
+function _seekConfirmation()
+{
+  printf '\n%s%s%s' "$_bold" "$@" "$_reset"
+  read -p " (y/n) " -n 1
+  printf '\n'
+}
+
+# Test whether the result of an 'ask' is a confirmation
+function _isConfirmed()
+{
+    if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+        return 0
+    fi
+    return 1
+}
+
+
+function _typeExists()
+{
+    if type "$1" >/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+function _isOs()
+{
+    if [[ "${OSTYPE}" == $1* ]]; then
+      return 0
+    fi
+    return 1
+}
+
+function _isOsDebian()
+{
+    if [[ -f /etc/debian_version ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+function _isOsRedHat()
+{
+    if [[ -f /etc/redhat-release ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+function _isOsMac()
+{
+    if [[ "$(uname -s)" = "Darwin" ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+function _checkRootUser()
+{
+    #if [ "$(id -u)" != "0" ]; then
+    if [ "$(whoami)" != 'root' ]; then
+        _die "You cannot run $0 as non-root user. Please use sudo $0"
+    fi
+}
+
+
+function askYesOrNo {
+    REPLY=""
+    while [ -z "$REPLY" ] ; do
+        read -ep "$1 $YES_NO_PROMPT" -n1 REPLY
+        REPLY=$(echo ${REPLY}|tr [:lower:] [:upper:])
+        case $REPLY in
+            $YES_CAPS ) return 0 ;;
+            $NO_CAPS ) return 1 ;;
+            * ) REPLY=""
+        esac
+    done
+}
+
+
+################################################################################
+# SCRIPT FUNCTIONS
+################################################################################
+function _printUsage()
+{
+    echo -n "Docker Init Magento Cloud Docker
+Version $VERSION
+
+./scripts/$(basename "$0") [ARG]...
+
+    Options:
+        --php-version             PHP version used for application (php70|php71|php72|php73|php74|php74-c2|php81-c2|php82).
+        --with-docker			  Also install in container
+        -h, --help                Display this help and exit.
+
+    Examples:
+      Install Magento Cloud Docker version 2.4.4 with PHP version 8.1 for domain test-magento-cloud.com:
+        ./scripts/$(basename "$0") --php-version=php81-c2 --with-docker
+"
+    exit 1
+}
+
+function checkCmdDependencies()
+{
+    local _dependencies=(
+      wget
+      cat
+      basename
+      mkdir
+      cp
+      mv
+      rm
+      chown
+      chmod
+      date
+      find
+      awk
+      docker-compose
+      docker
+    )
+
+    for cmd in "${_dependencies[@]}"
+    do
+        hash "${cmd}" &>/dev/null || _die "'${cmd}' command not found."
+    done;
+}
+
+
+function processArgs()
+{
+    for arg in "$@"
+    do
+        case $arg in
+        	--php-version=*)
+                APP_PHP="${arg#*=}"
+            ;;
+            --with-docker)
+                WITH_DOCKER='--with-docker'
+            ;;              
+            --debug)
+                DEBUG=1
+                set -o xtrace
+            ;;
+            -h|--help)
+                _printUsage
+            ;;
+            *)
+                _printUsage
+            ;;
+        esac
+    done
+        
+    validateArgs
+    sanitizeArgs
+}
+
+function initDefaultArgs()
+{
+    SCRIPTS_DIR="$(pwd)/scripts"
+    SOURCE_DIR="$(pwd)/sources"
+
+    YES_STRING=$"y"
+    NO_STRING=$"n"
+    YES_NO_PROMPT=$"[y/n]: "
+    YES_CAPS=$(echo ${YES_STRING}|tr [:lower:] [:upper:])
+    NO_CAPS=$(echo ${NO_STRING}|tr [:lower:] [:upper:])
+}
+
+
+function validateArgs()
+{
+    ERROR_COUNT=0
+    if [[ ! -z "$APP_PHP" && "$APP_PHP" != @(php70|php71|php72|php73|php74|php74-c2|php81-c2|php82) ]]; then
+        _error "Please enter valid application php --php-version=... parameter(php70|php71|php72|php73|php74|php74-c2|php81-c2|php82)."
+        ERROR_COUNT=$((ERROR_COUNT + 1))
+    fi
+    if [[ -z "$APP_PHP" ]]; then
+        _error "--php-version=... parameter is missing."
+        ERROR_COUNT=$((ERROR_COUNT + 1))
+    fi
+    
+    [[ "$ERROR_COUNT" -gt 0 ]] && exit 1
+}
+
+function sanitizeArgs()
+{
+    if [[ ! -z "$VHOST_DOMAIN" ]] && [[ "$VHOST_DOMAIN" == http* ]]; then
+        VHOST_DOMAIN=$(getPureDomain)
+    fi
+}
+
+function validateBaseServices()
+{
+    if [[ ! $($SCRIPTS_DIR/list-services | grep $APP_PHP) ]]; then
+        _error "$APP_PHP service should be started, please start $APP_PHP"
+        exit 1
+    fi
+}
+
+function installDockerSyncDependencies()
+{
+    _arrow "Installing 'docker-sync' and dependencies..."
+    runCommand 'sudo apt-get install -y ruby-dev' "Can not install 'docker-sync' and dependencies" nginx
+    _success "Done"
+    prepareBashShell
+    runCommand 'gem install --user-install docker-sync' "Can not install 'docker-sync'" nginx
+    _success "Done"
+	_success "Install 'docker-sync' and dependencies Done"
+}
+
+function prepareBashShell()
+{
+    local _rubyLine="which ruby >/dev/null && which gem >/dev/null"
+    if [[ "${WITH_DOCKER}" == "--with-docker" ]]; then
+	    if [[ $(docker-compose exec --user nginx ${APP_PHP} bash -c 'cat ~/.bashrc | grep "which ruby >/dev/null && which gem >/dev/null"') ]]; then
+	        _warning "Ruby and gem already exists in ~/.bashrc"
+	    else
+	    	_updateInfo "Updating .bashrc for gem & ruby..."
+	        local _rubyLineContent="if which ruby >/dev/null && which gem >/dev/null; then
+  PATH='\$(ruby -r rubygems -e 'puts Gem.user_dir')/bin:\$PATH'
+fi"
+			runCommand "echo '${_rubyLineContent}' | sudo tee -a ~/.bashrc" "Unable to write host to !/.bashrc" nginx
+		    runCommand 'source ~/.bashrc' "Can not apply .bashrc" nginx
+		    _success "Update .bashrc Done"
+	    fi
+	fi
+}
+
+function runCommand()
+{
+	if [[ "${WITH_DOCKER}" == "--with-docker" ]]; then 
+		_arrow "Run command in container ${APP_PHP}:"
+		_updateInfo "$1"
+		$(docker-compose exec --user $3 ${APP_PHP} bash -c "($1) &>/dev/null") || _die "$2"
+	else
+		_arrow "Run command in local machine:"
+		_updateInfo "$1"
+		$1 &>/dev/null || _die "$2"
+	fi	
+}
+function printSuccessMessage()
+{
+    echo "################################################################"
+    echo ""
+    echo " >> Begin Sync                   : docker-sync start"
+    echo " >> Start Sync & Cloud Container : docker-sync-stack start"
+    echo " >> Manual Sync                  : docker-sync sync"
+    echo " >> PHP version                  : ${APP_PHP}"
+    echo ""
+    echo "################################################################"
+}
+
+################################################################################
+# Main
+################################################################################
+export LC_CTYPE=C
+export LANG=C
+
+DEBUG=0
+_debug set -x
+VERSION="1"
+
+function main()
+{
+    checkCmdDependencies
+    
+    [[ $# -lt 1 ]] && _printUsage
+
+    processArgs "$@"
+    initDefaultArgs
+    if [[ "${WITH_DOCKER}" == "--with-docker" ]]; then
+    	$(docker-compose exec -T --user nginx ${APP_PHP} docker &>/dev/null) || installDocker
+    	$(docker-compose exec -T --user nginx ${APP_PHP} docker-compose &>/dev/null) || installDockerCompose
+	else
+		hash "${docker}" &>/dev/null || installDocker
+		hash "${docker-compose}" &>/dev/null || installDockerCompose
+    fi
+
+    installDockerSyncDependencies
+
+    printSuccessMessage
+    exit 0
+}
+
+main "$@"
+
+_debug set +x

@@ -14,7 +14,6 @@ php -r "\$from = \$to = 'php-contaier@docker.local'; \$x = mail(\$to, 'Testing e
 chown nginx:nginx /home/nginx/.composer
 chmod 644 /home/nginx/.ssh/config \
 && chmod -R 600 /home/nginx/.ssh/* \
-&& chmod 755 /home/nginx/.ssh/nestle \
 && chown -R nginx:nginx /home/nginx/ \
 && eval `ssh-agent -s`
 
