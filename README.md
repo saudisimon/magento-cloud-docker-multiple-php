@@ -396,7 +396,7 @@ Note: To use Xdebug with PHP Storm, you need to configure Map path in PHP Storm 
 
 2. Use the `./scripts/database import --source=backup.sql --target=magento2` command to import the backup file into the "magento2" database.
 
-### Exporting (Backing Up) the "yoyoyo" Database
+### Exporting (Backing Up) the "magento2" Database
 1. Use the `./scripts/database export --database-name=magento2` command to export (backup) the "magento2" database. The backup file will be saved in the `databases/export` directory.
 
 ### Dropping the "magento2" Database
