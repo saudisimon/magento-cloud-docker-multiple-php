@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+
+function write_out() {
+  [[ "$#" == 1 ]] && echo "$1" && return 0
+  case "$1" in
+    error)
+      shift
+      echo -e "\e[31m$*\e[0m"
+      ;;
+    success)
+      shift
+      echo -e "\e[32m$*\e[0m"
+      ;;
+    warning)
+      shift
+      echo -e "\e[33m$*\e[0m"
+      ;;
+    info)
+      shift
+      echo -e "\e[36m$*\e[0m"
+      ;;
+    *)
+      echo "$@"
+      ;;
+  esac
+}
+
+function applyPsr2Rule() {
+  write_out info "➜ [Scan Psr 2]"
+  $sfixpsr2 --standard=PSR2 $PATH_NAME  > /dev/null 2>&1
+
+  if [[ $FIX == "-f" ]]; then
+    write_out info "➜ [Apply Psr 2]"
+    $fixpsr2 --standard=PSR2 $PATH_NAME > /dev/null 2>&1
+  fi
+}
+
+function applyPsr12Rule() {
+  write_out info "➜ [Scan Psr 12]"
+  $sfixpsr2 --standard=PSR12 $PATH_NAME  > /dev/null 2>&1
+
+  if [[ $FIX == "-f" ]]; then
+    write_out info "➜ [Apply Psr 12]"
+    $fixpsr2 --standard=PSR12 $PATH_NAME  > /dev/null 2>&1
+  fi
+}
+
+function applyMagento2Rule() {
+  write_out info "➜ [Scan Magento 2]"
+  $sfixm2 --standard=Magento2 $PATH_NAME  > /dev/null 2>&1
+  if [[ $FIX == "-f" ]]; then
+    write_out info "➜ [Apply Magento 2]"
+    $fixm2 --standard=Magento2 $PATH_NAME  > /dev/null 2>&1
+  fi
+}
+
+function applyPhpCsFixerRule() {
+  write_out info "➜ [Apply PhpCsFixer]"
+  $csfix fix --config=./${pwd}/.php-cs-fixer.dist.php $PATH_NAME  > /dev/null 2>&1
+}
+
+function applyPhpCsFixerRiskyRule() {
+  write_out info "➜ [Apply PhpCsFixerRisky]"
+  $csfixrisk fix --config=./${pwd}/.php-cs-fixer.dist.php --allow-risky=yes $PATH_NAME  > /dev/null 2>&1
+}
+
+function scanPhpStanRule() {
+  write_out info "➜ [Analyse PhpStan --level $LV]"
+  $scanstan analyse $PATH_NAME -l $LV
+}
+
+PATH_NAME="$1"
+TOOL="$2"
+FIX="$3"
+LV="$4"
+
+sfixpsr2="./${pwd}/vendor/bin/phpcs"
+sfixpsr12="./${pwd}/vendor/bin/phpcs"
+sfixm2="./${pwd}/vendor/bin/phpcs"
+
+fixpsr2="./${pwd}/vendor/bin/phpcbf"
+fixpsr12="./${pwd}/vendor/bin/phpcbf"
+fixm2="./${pwd}/vendor/bin/phpcbf"
+csfix="./${pwd}/vendor/friendsofphp/php-cs-fixer/php-cs-fixer"
+csfixrisk="./${pwd}/vendor/friendsofphp/php-cs-fixer/php-cs-fixer"
+
+scanstan="./${pwd}/vendor/phpstan/phpstan/phpstan"
+
+if [[ $TOOL == '-f' ]]; then
+  FIX=$TOOL
+  TOOL=""
+fi
+
+if [ -z "$TOOL" ]; then
+  TOOL="all"
+fi
+
+if [ -z "$LV" ]; then
+  LV="6"
+  if [[ $TOOL == 'scanstan' ]]; then
+    LV="$3"
+    if [ -z "$LV" ]; then
+      LV="6"
+    fi
+  fi
+fi
+
+write_out success "[START] Code standard folder/file => $PATH_NAME"
+if [[ $TOOL == "all" ]]; then
+  applyPsr2Rule
+  applyPsr12Rule
+  applyMagento2Rule
+  if [[ $FIX == "-f" ]]; then
+    applyPhpCsFixerRule
+    applyPhpCsFixerRiskyRule
+  fi
+  scanPhpStanRule
+
+else
+  case "$TOOL" in
+    fixpsr2)
+      shift
+      applyPsr2Rule
+      ;;
+    fixpsr12)
+      shift
+      applyPsr12Rule
+      ;;
+    fixm2)
+      shift
+      applyMagento2Rule
+      ;;
+    csfix)
+      shift
+      applyPhpCsFixerRule
+      ;;
+    csfixrisk)
+      shift
+      applyPhpCsFixerRiskyRule
+      ;;
+    scanstan)
+      shift
+      scanPhpStanRule
+      ;;
+    *)
+      echo "$@ method not found"
+      ;;
+  esac
+fi
+
+write_out success "[END] Code standard folder/file => $PATH_NAME"
+write_out "===== CODE STANDARD DONE ====="
