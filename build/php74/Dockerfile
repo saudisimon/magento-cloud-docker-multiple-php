@@ -29,6 +29,7 @@ RUN apt-get update && apt-get install -y nano \
 	dnsutils \
 	ssmtp \
 	mailutils \
+	default-mysql-client \
     --no-install-recommends \
     && echo "mailhub=mailhog:1025" >> /etc/ssmtp/ssmtp.conf
     
