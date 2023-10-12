@@ -287,29 +287,15 @@ function sanitizeArgs()
     fi
 }
 
-function installDockerSyncDependencies()
+function uninstallDockerSyncDependencies()
 {
-    _arrow "Installing 'docker-sync' and dependencies..."
-    runCommand 'sudo apt-get install -y ruby-dev' "Can not install 'docker-sync' and dependencies" nginx
+    _arrow "Uninstalling 'docker-sync' and dependencies..."
+    _updateInfo "Run command: gem uninstall -a docker-sync"
+    gem uninstall -a docker-sync || _die "Can not uninstall 'docker-sync' and dependencies"
     _success "Done"
-    prepareBashShell
-    runCommand 'gem install --user-install docker-sync' "Can not install 'docker-sync'" nginx
-    _success "Done"
-	_success "Install 'docker-sync' and dependencies Done"
-}
-
-function prepareBashShell()
-{
-    if [[ $(cat /home/$USER/.bashrc | grep "which ruby >/dev/null && which gem >/dev/null") ]]; then
-        _warning "Ruby and gem already exists in /home/$USER/.bashrc"
-    else
-        _updateInfo "Updating .bashrc for gem & ruby..."
-        echo "if which ruby >/dev/null && which gem >/dev/null; then
+    _arrow "Remove 'if which ruby >/dev/null && which gem >/dev/null; then
 PATH=\"\$(ruby -r rubygems -e 'puts Gem.user_dir')/bin:\$PATH\"
-fi" | sudo tee -a /home/$USER/.bashrc || _die "Unable to write host to /home/$USER/.bashrc"
-        runCommand "source /home/$USER/.bashrc" "Can not apply .bashrc" nginx
-        _success "Update /home/$USER/.bashrc Done"
-    fi
+fi' to /home/${USER}/.bashrc manually"
 }
 
 function runCommand()
@@ -318,47 +304,31 @@ function runCommand()
     $1 || _die "$2"
 }
 
-function installUnison()
+function uninstallUnison()
 {
-    _arrow "Installing Unison"
+    _arrow "Uninstalling Unison"
     local _commandList=(
-        # "sudo apt install build-essential m4 unzip"
-        "wget https://caml.inria.fr/pub/distrib/ocaml-4.12/ocaml-4.12.0.tar.gz"
-        "tar -xzvf ocaml-4.12.0.tar.gz"
-        "cd ./ocaml-4.12.0"
-        "./configure"
-        "make world.opt"
-        "sudo make install"
-        "cd .."
-        "sudo apt install ocaml-nox ocaml-native-compilers camlp4-extra"
-        "wget https://github.com/bcpierce00/unison/archive/v2.52.1.tar.gz"
-        "tar -xzvf v2.52.1.tar.gz"
+        "sudo rm /usr/local/bin/unison"
         "cd ./unison-2.52.1"
-        "make"
-        "sudo cp src/unison /usr/local/bin/"
-        "unison -version"
+        "make clean"
         "cd .."
+        "sudo rm -rf /usr/local/bin/ocaml*"
+        "cd ./ocaml-4.12.0"
+        "sudo make uninstall"
+        "cd .."
+        "sudo rm -rf .ocaml-4.12.0"
+        "sudo rm -rf ./unison-2.52.1"
+        "sudo rm ocaml-4.12.0.tar.gz"
+        "sudo rm v2.52.1.tar.gz"
     )
 
     for cmd in "${_commandList[@]}"
     do
-        runCommand "${cmd}" "'${cmd}' can not be installed."
+        runCommand "${cmd}" "'${cmd}' can not be run."
     done;
 
-    _arrow "Add 'export PATH=/usr/local/bin:\$PATH' in /home/${USER}/.bashrc manually if not already had"
+    _arrow "Remove 'export PATH=/usr/local/bin:\$PATH' in /home/${USER}/.bashrc manually"
     _success "Done"
-}
-
-function printSuccessMessage()
-{
-    echo "################################################################"
-    echo ""
-    echo " >> Begin Sync                   : docker-sync start"
-    echo " >> Start Sync & Cloud Container : docker-sync-stack start"
-    echo " >> Manual Sync                  : docker-sync sync"
-    echo " >> PHP version                  : ${APP_PHP}"
-    echo ""
-    echo "################################################################"
 }
 
 ################################################################################
@@ -379,10 +349,12 @@ function main()
 
     processArgs "$@"
     initDefaultArgs
-    hash "docker-sync" &>/dev/null || installDockerSyncDependencies
-    hash "unison2" &>/dev/null || installUnison
+    # hash "docker-sync" &>/dev/null || _die "'docker-sync' not installed yet."
+    # hash "unison" &>/dev/null || _die "'unison' not installed yet."
 
-    printSuccessMessage
+    uninstallDockerSyncDependencies
+    uninstallUnison
+
     exit 0
 }
 

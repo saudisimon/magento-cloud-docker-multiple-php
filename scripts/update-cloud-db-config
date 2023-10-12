@@ -25,14 +25,16 @@ function write_out() {
   esac
 }
 
+SQL_SCRIPT=''
+
 function executeSQL() {
-    mysql -u root -proot magento_1695094882 -h mysql -e "$1"
+   docker-compose run --rm deploy mysql -u root -pmagento2 magento2 -h db -e "$1"
 }
 
 function updateConfig() {
     write_out info "Update config: $1   =>   $2"
-    executeSQL "DELETE FROM core_config_data WHERE path = '$1';"
-    executeSQL "INSERT INTO core_config_data (config_id, scope, scope_id, path, value, updated_at) VALUES (NULL, 'default', '0', '$1', '$2', CURRENT_TIMESTAMP);"
+    SQL_SCRIPT="${SQL_SCRIPT} DELETE FROM core_config_data WHERE path = '$1';"
+    SQL_SCRIPT="${SQL_SCRIPT} INSERT INTO core_config_data (config_id, scope, scope_id, path, value, updated_at) VALUES (NULL, 'default', '0', '$1', '$2', CURRENT_TIMESTAMP);"
 }
 
 # Update config
@@ -42,12 +44,10 @@ updateConfig 'admin/security/session_lifetime' '31536000'
 updateConfig 'admin/security/admin_account_sharing' '1'
 updateConfig 'admin/security/use_form_key' '0'
 updateConfig 'admin/security/lockout_failures' '100'
-updateConfig 'web/unsecure/base_url' 'https://demo-cloud.dev.local/'
-updateConfig 'web/secure/base_url' 'https://demo-cloud.dev.local/'
 updateConfig 'web/secure/use_in_adminhtml' '0'
+
 
 # Update admin password
 ADPW="d80835acfefa2d785b5cddfe57faa32d66900b91ff233eac25b714edc1ee5272:Gp540oGVHE80Ce0YqMkluWoFZupy25Z9:3_32_2_67108864" #admin123
-executeSQL "UPDATE admin_user SET username = 'admin', password = '$ADPW' WHERE admin_user.user_id = 1;"
-
-bin/magento c:f
+SQL_SCRIPT="${SQL_SCRIPT} UPDATE admin_user SET username = 'admin', password = '$ADPW' WHERE admin_user.user_id = 1;"
+executeSQL "${SQL_SCRIPT}"

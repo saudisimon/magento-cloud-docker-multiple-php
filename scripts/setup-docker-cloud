@@ -49,6 +49,11 @@ function _arrow()
     printf '➜ %s\n' "$@"
 }
 
+function _updateInfo()
+{
+    printf '%s➜ %s%s\n' "$_blue" "$@" "$_reset"
+}
+
 function _success()
 {
     printf '%s✔ %s%s\n' "$_green" "$@" "$_reset"
@@ -188,11 +193,15 @@ Version $VERSION
     Options:
         --php-version             PHP version used for application (php70|php71|php72|php73|php74|php74-c2|php81-c2|php82).
         --domain                  Domain name (eg: test.com).
+        --magento-version         Magento Version (eg: 2.3.4).
+        --with-xdebug             Build docker-compose file with xdebug
+        --with-cron               Build docker-compose file with cron
+        --with-selenium           Build docker-compose file with selenium(MFTF)
         -h, --help                Display this help and exit.
 
     Examples:
       Install Magento Cloud Docker version 2.4.4 with PHP version 8.1 for domain test-magento-cloud.com:
-        ./scripts/$(basename "$0") --domain=test-magento-cloud.com --php-version=php81-c2
+        ./scripts/$(basename "$0") --domain=test-magento-cloud.com --magento-version=2.3.4 --php-version=php81-c2 --with-xdebug --with-cron --with-selenium
 "
     exit 1
 }
@@ -242,6 +251,8 @@ function installDockerCompose()
 {
     _arrow "Installing Docker Compose in container ${APP_PHP}"
     docker-compose exec -T --user root ${APP_PHP} bash -c 'curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose && chmod +x /usr/local/bin/docker-compose && docker-compose --version' || _die "'docker-compose' can not be install"
+    docker-compose exec -T --user nginx ${APP_PHP} bash -c 'sudo chmod 666 /var/run/docker.sock' || _die "'docker-compose' can not be install"
+    
     _success "Install Docker Compose done"
 }
 
@@ -253,9 +264,21 @@ function processArgs()
             --domain=*)
                 VHOST_DOMAIN="${arg#*=}"
             ;;
+            --magento-version=*)
+                MAGENTO_VERSION="${arg#*=}"
+            ;;
             --php-version=*)
                 APP_PHP="${arg#*=}"
-            ;;            
+            ;;
+            --with-xdebug)
+                WITH_XDEBUG='--with-xdebug'
+            ;;
+            --with-cron)
+                WITH_CRON='--with-cron'
+            ;;  
+            --with-selenium)
+                WITH_SELENIUM='--with-selenium --with-test'
+            ;;              
             --debug)
                 DEBUG=1
                 set -o xtrace
@@ -286,6 +309,15 @@ function initDefaultArgs()
 
     NGINX_SITES_CONF_D="$(pwd)/conf/nginx/conf.d"
     NGINX_SITES_CONF_D_FILE="${NGINX_SITES_CONF_D}/${VHOST_DOMAIN}.conf"
+    if [[ "${WITH_XDEBUG}" != "--with-xdebug" ]]; then
+        WITH_XDEBUG=""
+    fi
+    if [[ "${WITH_CRON}" != "--with-cron" ]]; then
+        WITH_CRON=""
+    fi
+    if [[ "${WITH_SELENIUM}" != "--with-selenium --with-test" ]]; then
+        WITH_SELENIUM=""
+    fi
 }
 
 
@@ -294,6 +326,10 @@ function validateArgs()
     ERROR_COUNT=0
     if [[ -z "$VHOST_DOMAIN" ]]; then
         _error "--domain=... parameter is missing."
+        ERROR_COUNT=$((ERROR_COUNT + 1))
+    fi
+    if [[ -z "$MAGENTO_VERSION" ]]; then
+        _error "--mangeto-version=... parameter is missing."
         ERROR_COUNT=$((ERROR_COUNT + 1))
     fi
     if [[ ! -z "$APP_PHP" && "$APP_PHP" != @(php70|php71|php72|php73|php74|php74-c2|php81-c2|php82) ]]; then
@@ -323,6 +359,42 @@ function validateBaseServices()
     fi
 }
 
+function setupDependenciesVersion()
+{
+    MYSQL_VERSION="8.0"
+    OPENSEARCH_VERSION="1.2"
+    if [[ $MAGENTO_VERSION = @(2.4.0*|2.4.1*|2.4.2*|2.4.3*) ]]; then 
+        PHP_VERSION="7.4"
+        REDIS_VERSION="6.0"
+        if [[ $MAGENTO_VERSION = @(2.4.0*|2.4.1*) ]]; then 
+            REDIS_VERSION="5.0"
+        fi
+    elif [[ $MAGENTO_VERSION = @(2.4.4*|2.4.5*) ]]; then 
+        PHP_VERSION="8.1"
+        REDIS_VERSION="6.2"
+    elif [[ $MAGENTO_VERSION = @(2.4.6*|2.4.7*) ]]; then 
+        PHP_VERSION="8.2"
+        REDIS_VERSION="7.0"
+        if [[ $MAGENTO_VERSION = @(2.4.7*) ]]; then
+            OPENSEARCH_VERSION="2.3"
+        fi
+    fi
+}
+
+function validateMagentoVersion()
+{
+    if [[ $MAGENTO_VERSION = @(2.4.0*|2.4.1*|2.4.2*|2.4.3*) ]]; then 
+        if [[ $APP_PHP != "php74" ]]; then
+            _error "PHP should run with PHP version 7.4 composer1, --php-version=php74"
+            exit 1
+        fi
+    elif [[ $MAGENTO_VERSION == 2.4* ]] && [[ $MAGENTO_VERSION != @(2.4.0*|2.4.1*|2.4.2*|2.4.3*) ]]; then 
+        if [[ $APP_PHP != @(php81-c2*|php82*) ]]; then
+            _error "PHP should run with PHP version 8.1 composer2 or PHP version 8.2, --php-version=php81-c2 or --php-version=php82 "
+            exit 1
+        fi
+    fi
+}
 
 function checkComposerAuth()
 {
@@ -358,7 +430,7 @@ function installEceToolsPackage()
 function installDockerCloudPackage()
 {
     _arrow "Install package magento/magento-cloud-docker"
-    docker-compose exec -T --user root ${APP_PHP} bash -c 'cd ./'${VHOST_DOMAIN}' && composer require --dev --no-update magento/magento-cloud-docker && composer update' || _die "Cannot install magento/magento-cloud-docker package"
+    docker-compose exec -T --user nginx ${APP_PHP} bash -c 'cd ./'${VHOST_DOMAIN}' && composer require --dev --no-update magento/magento-cloud-docker && composer update' || _die "Cannot install magento/magento-cloud-docker package"
     _success "Install package magento/magento-cloud-docker done"
 }
 
@@ -404,6 +476,33 @@ function prepareDockerFilePath()
     fi
 }
 
+function prepareTestEnvFilePath()
+{
+    if [[ ! -f "${SOURCE_DIR}/$VHOST_DOMAIN/dev/tests/acceptance/.env" ]]; then
+        _warning "${SOURCE_DIR}/$VHOST_DOMAIN/dev/tests/acceptance/.env is not exist yet!"
+        if askYesOrNo $"Do you want to create it?"; then
+            _arrow "Creating ${SOURCE_DIR}/$VHOST_DOMAIN/dev/tests/acceptance/.env"
+            sudo touch ${SOURCE_DIR}/$VHOST_DOMAIN/dev/tests/acceptance/.env
+            sudo chmod 777 -R ${SOURCE_DIR}/$VHOST_DOMAIN/dev/tests/acceptance/.env
+            _success "${SOURCE_DIR}/$VHOST_DOMAIN/dev/tests/acceptance/.env created!"
+        else
+            _error "Please check your source path or manual create it!"
+            exit 1
+        fi
+    fi
+}
+
+function prepareTestEnvFileContent()
+{
+    _updateInfo "Update dev/tests/acceptance/.env"
+    echo "MAGENTO_BASE_URL=http://magento2.docker/
+MAGENTO_BACKEND_NAME=admin
+MAGENTO_ADMIN_USERNAME=admin
+MAGENTO_ADMIN_PASSWORD=123123q
+MODULE_WHITELIST=Magento_Framework,Magento_ConfigurableProductWishlist,Magento_ConfigurableProductCatalogSearch
+SELENIUM_HOST=selenium" > ${SOURCE_DIR}/${VHOST_DOMAIN}/dev/tests/acceptance/.env
+}
+
 function prepareDockerFileContent()
 {
     echo "name: magento
@@ -411,21 +510,24 @@ system:
     mode: 'developer'
 services:
     php:
-        version: '8.1'
+        version: '${PHP_VERSION}'
         extensions:
             enabled:
                 - xsl
                 - json
                 - redis
     mysql:
-        version: '8.0'
+        version: '${MYSQL_VERSION}'
         image: 'mysql'
     redis:
-        version: '7.0'
+        version: '${REDIS_VERSION}'
         image: 'redis'
     opensearch:
-        version: '1.2'
+        version: '${OPENSEARCH_VERSION}'
         image: 'magento/magento-cloud-docker-opensearch'
+    mailhog:
+        version: '1.0-1.4.0'
+        image: 'magento/magento-cloud-docker-mailhog'
 hooks:
     build: |
         set -e
@@ -454,8 +556,63 @@ mounts:
 function applyDockerConfig()
 {
     _arrow "Running vendor/bin/ece-docker build:compose to create docker compose file"
-    docker-compose exec --user nginx ${APP_PHP} bash -c './'$VHOST_DOMAIN'/vendor/bin/ece-docker build:compose --mode="developer" --sync-engine="native" --expose-db-port=3306 --with-cron --set-docker-host --with-xdebug' || _die "Running vendor/bin/ece-docker build:compose failed"
-    docker-compose exec --user nginx ${APP_PHP} bash -c 'cd ./'$VHOST_DOMAIN' && cp .docker/config.php.dist .docker/config.php && bin/magento-docker pull && bin/magento-docker up' || _die "Can not create docker config"
+    _arrow "Checking volume is exist..."
+    if [[ ! $(docker volume list | grep "magento-magento-sync") ]]; then
+        _updateInfo "Creating new volume name 'magento-magento-sync'"
+        docker volume create --name=magento-magento-sync || _die "Can not create volume 'magento-magento-sync'"
+    else
+        _warning "Volume name 'magento-magento-sync' already exist"
+    fi
+    docker-compose exec --user root ${APP_PHP} bash -c './'$VHOST_DOMAIN'/vendor/bin/ece-docker build:compose --mode="developer" --sync-engine="docker-sync" --expose-db-port=3306 --set-docker-host '${WITH_XDEBUG}' '${WITH_CRON}' '${WITH_SELENIUM}''  || _die "Running vendor/bin/ece-docker build:compose failed"
+    echo "version: 2
+options:
+  verbose: true
+  debug: true
+  daemon: true
+  max-attempt: 30
+syncs:
+  magento-magento-sync:
+    src: './'
+    sync_excludes:
+      - '.git'
+      - '.idea'
+      - '.magento'
+      - '.docker'
+      - '.github'
+      - '*.sql'
+      - '*.gz'
+      - '*.zip'
+      - '*.bz2'
+    watch_excludes: [
+      '.idea',
+      '.git',
+      '.idea',
+      '.magento',
+      '.docker',
+      '.github',
+      '*.sql',
+      '*.gz',
+      '*.zip',
+      '*.bz2'
+    ]
+    watch: true
+    sync_strategy: 'unison'
+    monit_enable: true
+    sync_userid: '33'
+    sync_args:
+      - '-logfile=/tmp/unison.log'
+    " > "${SOURCE_DIR}/$VHOST_DOMAIN/docker-sync.yml"
+    _updateInfo "${SOURCE_DIR}/$VHOST_DOMAIN/docker-sync.yml file has been updated."
+    docker-compose exec --user root ${APP_PHP} bash -c 'cd ./'$VHOST_DOMAIN' && cp .docker/config.php.dist .docker/config.php && bin/magento-docker pull && docker-compose up -d --remove-orphans' || _die "Can not create docker config"
+
+    if [[ "${WITH_SELENIUM}" == "--with-selenium --with-test" ]]; then 
+        _arrow "Configure Selenium Env..."
+        prepareTestEnvFilePath
+        prepareTestEnvFileContent
+        _arrow "Update database config"
+        cd ${SOURCE_DIR}/${VHOST_DOMAIN}
+        ${SCRIPTS_DIR}/update-cloud-db-config
+    fi
     DATABASE_NAME="magento2"
     rootPass="magento2"
     ADMIN_USER="Admin"
@@ -500,14 +657,17 @@ function main()
 
     processArgs "$@"
     initDefaultArgs
+
+    validateMagentoVersion
+    validateBaseServices
     $(docker-compose exec -T --user nginx ${APP_PHP} docker &>/dev/null) || installDocker
     $(docker-compose exec -T --user nginx ${APP_PHP} docker-compose &>/dev/null) || installDockerCompose
-
-    validateBaseServices
 
     checkComposerAuth
     $(docker-compose exec -T --user nginx ${APP_PHP} bash -c 'cd ./'${VHOST_DOMAIN}' && composer show -- magento/ece-tools &>/dev/null') || installEceToolsPackage
     $(docker-compose exec -T --user nginx ${APP_PHP} bash -c 'cd ./'${VHOST_DOMAIN}' && composer show -- magento/magento-cloud-docker &>/dev/null') || installDockerCloudPackage
+
+    setupDependenciesVersion
     installDockerCloud
 
     printSuccessMessage
