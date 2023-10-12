@@ -380,7 +380,7 @@ function main()
     processArgs "$@"
     initDefaultArgs
     hash "docker-sync" &>/dev/null || installDockerSyncDependencies
-    hash "unison2" &>/dev/null || installUnison
+    hash "unison" &>/dev/null || installUnison
 
     printSuccessMessage
     exit 0

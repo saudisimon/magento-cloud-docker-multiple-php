@@ -185,7 +185,7 @@ function askYesOrNo {
 ################################################################################
 function _printUsage()
 {
-    echo -n "Install Docker Sync for Magento Cloud
+    echo -n "Uninstall Docker Sync for Magento Cloud
 Version $VERSION
 
 ./scripts/$(basename "$0") [ARG]...
@@ -349,8 +349,8 @@ function main()
 
     processArgs "$@"
     initDefaultArgs
-    # hash "docker-sync" &>/dev/null || _die "'docker-sync' not installed yet."
-    # hash "unison" &>/dev/null || _die "'unison' not installed yet."
+    hash "docker-sync" &>/dev/null || _die "'docker-sync' not installed yet."
+    hash "unison" &>/dev/null || _die "'unison' not installed yet."
 
     uninstallDockerSyncDependencies
     uninstallUnison
