@@ -308,18 +308,15 @@ function uninstallUnison()
 {
     _arrow "Uninstalling Unison"
     local _commandList=(
-        "sudo rm /usr/local/bin/unison"
+        "sudo rm -rf /usr/local/bin/unison"
         "cd ./unison-2.52.1"
         "make clean"
         "cd .."
         "sudo rm -rf /usr/local/bin/ocaml*"
-        "cd ./ocaml-4.12.0"
-        "sudo make uninstall"
-        "cd .."
-        "sudo rm -rf .ocaml-4.12.0"
+        "sudo rm -rf ./ocaml-4.12.0"
         "sudo rm -rf ./unison-2.52.1"
-        "sudo rm ocaml-4.12.0.tar.gz"
-        "sudo rm v2.52.1.tar.gz"
+        "sudo rm -rf ocaml-4.12.0.tar.gz"
+        "sudo rm -rf v2.52.1.tar.gz"
     )
 
     for cmd in "${_commandList[@]}"
@@ -349,11 +346,17 @@ function main()
 
     processArgs "$@"
     initDefaultArgs
-    hash "docker-sync" &>/dev/null || _die "'docker-sync' not installed yet."
-    hash "unison" &>/dev/null || _die "'unison' not installed yet."
+    if ! hash "docker-sync" &>/dev/null; then
+        _warning "'docker-sync' not installed yet."
+    else
+        uninstallDockerSyncDependencies
+    fi
 
-    uninstallDockerSyncDependencies
-    uninstallUnison
+    if ! hash "unison" &>/dev/null; then
+        _warning "'unison' not installed yet."
+    else
+        uninstallUnison
+    fi
 
     exit 0
 }
