@@ -286,7 +286,10 @@ function sanitizeArgs()
         VHOST_DOMAIN=$(getPureDomain)
     fi
 }
-
+function getPureDomain()
+{
+    echo "$VHOST_DOMAIN" | awk -F'[:\\/]' '{print $4}'
+}
 function uninstallDockerSyncDependencies()
 {
     _arrow "Uninstalling 'docker-sync' and dependencies..."

@@ -273,7 +273,8 @@ function initDefaultArgs()
     YES_NO_PROMPT=$"[y/n]: "
     YES_CAPS=$(echo ${YES_STRING}|tr [:lower:] [:upper:])
     NO_CAPS=$(echo ${NO_STRING}|tr [:lower:] [:upper:])
-    DATABASE_NAME="magento"_"$(date +%s)"
+    # DATABASE_NAME="magento"_"$(date +%s)"
+    DATABASE_NAME="magento_1695364488"
 
     NGINX_SITES_CONF_D="$(pwd)/conf/nginx/conf.d"
     NGINX_SITES_CONF_D_FILE="${NGINX_SITES_CONF_D}/${VHOST_DOMAIN}.conf"
@@ -321,6 +322,11 @@ function sanitizeArgs()
     if [[ ! -z "$VHOST_DOMAIN" ]] && [[ "$VHOST_DOMAIN" == http* ]]; then
         VHOST_DOMAIN=$(getPureDomain)
     fi
+}
+
+function getPureDomain()
+{
+    echo "$VHOST_DOMAIN" | awk -F'[:\\/]' '{print $4}'
 }
 
 function verifyCurrentDirIsDockercomposeDir()
@@ -526,12 +532,12 @@ function main()
     validateMagentoVersion
     validateBaseServices
 
-    createSourceCodeFolder
+    # createSourceCodeFolder
     createMagentoDomain
     createDomainDatabase
 
     checkComposerAuth
-    downloadMagentoVersion
+    # downloadMagentoVersion
 
     getMysqlInformation
     installMagentoVersion
